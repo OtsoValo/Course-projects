@@ -1,0 +1,8 @@
+\contentsline {section}{Introduction}{1}{section*.1}
+\contentsline {section}{Motivation}{2}{section*.2}
+\contentsline {section}{Implementation}{3}{section*.3}
+\contentsline {subsection}{Retrieving tail call statements}{3}{subsection*.4}
+\contentsline {subsection}{Code Generation}{5}{subsection*.5}
+\contentsline {section}{Testing}{6}{section*.6}
+\contentsline {section}{Conclusions}{6}{section*.7}
+\contentsfinish 

@@ -1,0 +1,81 @@
+\documentclass{tufte-handout}
+
+\usepackage{proposal}
+
+\begin{document}
+\thispagestyle{empty}
+\maketitle% this prints the handout title, author, and date
+
+\begin{abstract}
+\noindent The goal of this project is to implement tail call optimization for the Joos\footnote{Joos (Java's Object Oriented Subset) is a subset of Java used for teaching and research.}-to-Assembler compiler \textit{Juice} written in Java. Tail call optimization avoids stack overflows in
+functions involving tail recursion.
+\end{abstract}
+
+A \textit{tail call}%\marginnote{What is a tail call?}
+\ is a function call in tail position. An expression is in \textit{tail position} when evaluating the expression is the last 'action' that a function has to perform before returning.
+
+If a function calls itself in a tail call, the function is said to be \textit{tail recursive}%\marginnote{tail recursion}
+. %Tail recursion is an important type of tail calls. 
+Let's consider an example of a factorial function in Haskell:
+
+\inputMinted{haskell}{fact1.hs}
+
+\noindent In line 3, \verb'fact' calls itself recursively; after the result of \verb'fact(n - 1)' is obtained, it has to be multiplied by \verb'n'. The recursive call is
+not the last action performed before the result of \verb'fact n' is returned, and therefore this is not a case of tail recursion. 
+
+Every time \verb'fact' calls itself recursively, a new stack frame is allocated on the call stack, which can cause a stack overflow for large \verb'n'. 
+
+Let's rewrite the factorial function in a tail-recursive way:
+
+\inputMinted{haskell}{fact2.hs}
+
+\noindent Running this code will reveal that no stack overflow occurs even for large values of~\verb'n'. What is happenning here is that the Haskell compiler is performing a \textit{tail call optimization} (TCO). 
+Because the return value of \verb'fact2' is the return value of the tail call, we can pop \verb'fact2''s stack frame from the call stack, push the stack frame for the tail call, and replace the tail call's return address with \verb'fact2''s return address. For a large chain of tail calls, this optimization saves a significant amount of memory on the stack. 
+
+Unlike compilers of functional languages, the Java Virtual Machine does not support TCO. 
+
+However, as argued by Matthias Felleisen\footnote{One of the creators of the Racket programming language}, ``a language should implement TCO in support of proper design''\footnote{Comment on J. Rose's, ``Tail calls in the VM'' article, \href{https://blogs.oracle.com/jrose/entry/tail_calls_in_the_vm}{blogs.oracle.com/jrose/entry/tail\_calls\_in\_the\_vm}}. The reason is that the implementation of many object-oriented design patterns in Java will likely result in stack overflows even when all methods use tail recursion: ``Java isn't TCO [...], meaning it doesn't allow programmers to design according  
+to OO principles.''
+
+As an example, let's look at the object-oriented principle of using Class Hierarchies for Unions\footnote{Bloch, J. ``Effective Java.'' Prentice Hall, 2008.} that Felleisen demonstrated at the 18th ECOOP\footnote{European Conference on Object-Oriented Programming, 2004, Oslo}.
+To implement a list data structure, we create an abstract class \verb'List<T>' that can either be \verb'Empty' or a pair \verb'Cons' of an element of type \verb'T' and the rest of the list:
+
+\inputMinted{java}{list.java}
+
+If we run a test program
+
+\inputMinted{java}{test.java}
+
+\noindent on \verb'main(100000)', we get a StackOverflowError which would not happen if Java supported tail call optimization. The same test in a Haskell program as follows runs just fine:
+
+\inputMinted{haskell}{list.hs}
+
+The problem with implementing TCO in Java is that the Java Virtual Machine supports \textit{stack inspection} which invalidates program transformations like TCO\footnote{Fournet, Cedric, Gordon. ``Stack inspection: Theory and variants.'' ACM SIGPLAN Notices 37.1 (2002): 307-318.}.
+
+Given the more simple nature of Joos, implementing TCO should be possible, at least for certain scenarios. This will be the objective of my project.
+
+%In Joos, a tail position is the right-hand side of a \verb'return' statment%
+%\footnote{In Java, if the return statement were in a 'try/catch'
+%block, the tail position would depend on the existence of a 'finally' block.}
+%. Hence, a function call $f(a_1,\,\dots,\,a_n)$ will be in tail position if it is the argument of a \verb'return' statement.
+%
+%Specifically, 
+
+%smth specific for Java?
+
+%Advantages, why relevant?
+
+% save space
+
+%avoid stack overflow
+
+%ex: Felleisen (design patterns)
+
+\nocite{*}	% causes all the references in the bib file to be included
+
+\end{document}
+
+\begin{fullwidth}
+\bibliography{bib}
+\end{fullwidth}
+\end{document}

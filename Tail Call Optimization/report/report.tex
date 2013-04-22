@@ -1,0 +1,173 @@
+\documentclass{tufte-handout}
+
+\usepackage{report}
+
+\begin{document}
+\thispagestyle{empty}
+\maketitle% this prints the handout title, author, and date
+
+\begin{abstract}
+\noindent This project aims to implement tail call optimization for \textit{Juice}, a compiler from Joos\footnote{Joos (Java's Object Oriented Subset) is a subset of Java used for teaching and research.} to Assembly. Tail call optimization allows writing deeply recursive functions without overflowing the stack.
+\end{abstract}
+
+\tableofcontents
+
+\section{Introduction}
+
+A \textit{tail call}%\marginnote{What is a tail call?}
+\ is a call site~--- a statement consisting of a function call~--- in tail position. A call site is said to be in \textit{tail position} if it is the last statement that a function has to perform before returning.
+
+An important type of tail call is tail recursion. A function is \textit{tail recursive}
+if it invokes itself in a tail call.
+
+Let's consider a Haskell function that calculates Fibonacci numbers:
+
+\inputMinted{haskell}{fibo1.hs}
+
+\noindent In line 3, \verb'fibo' calls itself recursively twice. After the recursive call of \verb'fibo(n - 1)' is performed, it has to be added to the result of \verb'fibo(n - 2)'. The recursive call is
+not the last action performed before the result of \verb'fibo n' is returned, and therefore this is not a case of tail recursion. Moreover, we have to recalculate \verb'fibo(n - 2)' in the recursive call of \verb'fibo(n - 1)' which makes \verb'fibo' have exponential runtime.
+
+To improve efficiency, we have to ensure that the evaluation of every previous member of the sequence is done only once. This can be done easily by using accumulators and tail recursion:
+
+\inputMinted{haskell}{fibo2.hs}
+
+\noindent Running this code will reveal that no stack overflow occurs even for large values of~\verb'n': e.g. the result of \verb'fibo 100000' will be calculated right away. Besides the linear complexity of the algorithm, the reason for the better performance is that the Haskell compiler performs \textit{tail call optimization} (TCO).
+Because the return value of \verb'fibo2' is the return value of the tail call, we can pop \verb'fibo2''s stack frame from the call stack, push the stack frame for the tail call, and replace the tail call's return address with \verb'fibo2''s return address. For a large sequence of nested tail calls, this optimization reduces the number of necessary stack frames from linear to constant.
+
+%REPHRASE
+\section{Motivation}
+Unlike compilers of functional languages, the Java Virtual Machine (JVM) does not support TCO. 
+
+However, the implementation of many object-oriented design patterns in Java can result in stack overflows even when all methods use tail recursion\footnote{Comment by Matthias Felleisen on J. Rose's, ``Tail calls in the VM'' article, \href{https://blogs.oracle.com/jrose/entry/tail_calls_in_the_vm}{blogs.oracle.com/jrose/entry/tail\_calls\_in\_the\_vm}}.
+
+For instance, according to good object-oriented programming practice, Class Hierarchies should be used to represent Unions\footnote{Bloch, J. ``Effective Java.'' Prentice Hall, 2008.}. Here is an example similar to what M.~Felleisen, one of the creators of the Racket programming language, demonstrated on the European Conference on Object-Oriented Programming, 2004.
+To implement a list data structure, we create an abstract class \verb'List<T>' that can either be \verb'Empty' or a pair \verb'Cons' of an element of type \verb'T' and the rest of the list:
+
+\inputMinted{java}{list.java}
+
+If we run a test program
+
+\inputMinted{java}{test.java}
+
+\noindent on \verb'main(100000)', we get a StackOverflowError which would not happen if Java supported tail call optimization.
+
+It is difficult to implement TCO for Java because the JVM supports \textit{stack inspection} which impairs program transformations like TCO\footnote{Fournet, Cedric, Gordon. ``Stack inspection: Theory and variants.'' ACM SIGPLAN Notices 37.1 (2002): 307-318.}.
+
+The objective of this project is to implement TCO for Joos. Joos is a subset of Java that does not compile to the JVM and does not have the mentioned limitations that would hinder us from implementing TCO.
+
+\section{Implementation}
+
+The implementation of TCO consists of two parts: 
+\begin{itemize}
+  \item finding out which statements are tail calls
+  \item modifying code generation logic for method invocations to readjust the stack frame of the caller function
+\end{itemize}
+For every source Joos class, a list of tail call statements \verb'tailCalls' is retrieved according to the first part. This is done during the static analysis of the program. The list is then passed to and stored in the \verb'CodeGenerator' class. Before the code for a method invocation is generated, we check if that method invocation's node is contained in \verb'tailCalls'. If it is, the method invocation code will be optimized as TCO. In the next two sections we describe the implementation of the two parts in detail.
+
+\subsection{Retrieving tail call statements}
+We consider a statement to be in tail position according to the following definition\footnote{For Java, this definition would be insufficient. Whenever a statement were surrounded by a \texttt{try}/\texttt{catch} block, the tail position would depend on the existence of a \texttt{finally} block.}.
+\begin{definition}[Tail call]
+  A method invocation $m$ is a tail call if it satisfies one of the following conditions:
+  \begin{enumerate}
+    \item It is the right-hand side of a \verb'return' statement in a non-void method\footnote{i.e.~\texttt{return} $\ m$\texttt{;}};
+    \item In a void method, $m$ is the last statement of a statement $s$, and $s$ is immediately followed by a \verb'return' statement\footnote{e.g. $m$\texttt{; return;} (here, $s=m$)};
+    \item $m$ is the last statement of a void method.
+  \end{enumerate}
+\end{definition}
+
+\begin{definition}[Last statement]
+  A statement $s$ is said to be the last statement of another statement\footnote{A statement can be either single or compound.} $b$ if $s$ and $b$ satisfy one of the following conditions:
+  \begin{enumerate}
+    \item $b$ is a single statement, and $s=b$.
+    \item $b$ consists of a sequence of statements $s_1,\,\dots,\,s_n$, and $s=s_n$.
+    \item $b$ is a conditional statement: $b=$\verb' if('$\,c\,$\verb') {'$\,t\,$\verb'} else {'$\,e\,$\verb'}', where $c$ is a conditional expression, $t$ and $e$ are statements, and $s$ is the last statement of $t$ or of $e$.
+  \end{enumerate}
+  If $b$ is a \verb'while' or \verb'for' loop, it does not have a last statement.
+\end{definition}
+
+Determining if a statement is a tail call is done with two implementations of the visitor pattern\footnote{Erich, Gamma, et al. ``Design patterns: elements of reusable object-oriented software.'' Reading: Addison Wesley Publishing Company (1995)}:  one that gets the last statement of a method, and one that gets the statement before a \verb'return' statement in void methods.
+
+Assume we got to a \verb'return' statement in a void method, and we need to recursively get the last statement of the block that precedes the \verb'return' statement. We will traverse the tree of that preceding block looking for all statements that could be executed last. However, if we were to traverse a block of statements looking only for statements that come before \verb'return' statements, we would not include the statements that will be executed last in that block. This is why we need to traverse the tree in two different modes, using two visitors.
+
+The first visitor, \verb'TailCalls', finds method invocations in \verb'return' statements of non-void methods and invokes the second visitor, \verb'LastStatements', which finds the last statements of a statement. For every Abstract Syntax Tree (AST) node, both visitors return a list of statements.
+
+For non-void methods, \verb'TailCalls' returns the method invocations on the right-hand sides of \verb'return' statements. For void methods, it does two things:
+\begin{itemize}
+  \item finds all \verb'return' statements and invokes \verb'LastStatements' on the statement $s$ preceding the \verb'return' statement, if $s$ is not a loop
+  \item invokes \verb'LastStatements' on the body of method declaration nodes
+\end{itemize}
+The list of statements returned by \verb'LastStatements' is added to the list of \verb'TailCalls' statements. 
+
+\verb'LastStatement', on the other hand, finds last statements according to definition~2.
+
+The resulting list of tail call statements is passed into the \verb'CodeGenerator' visitor pattern constructor.
+
+\subsection{Code Generation}
+
+The code generation for a method invocation of a method $m$ has the following outline, if $m$ is \textit{not} in tail position:
+
+\inputMinted{nasm}{nontc.asm}
+
+A typical stack frame for a non-static method is shown on figure~1. If the method is static, the stack frame will not include space for the implicit \verb'this'. 
+
+\begin{marginfigure}
+\begin{tabular}{|c|}
+\\
+\hline
+\\
+\texttt{arguments}\\
+\\
+\hline
+\texttt{implicit this}\\
+\hline
+\texttt{return address}\\
+\hline
+\texttt{ebp}\\
+\hline
+\\
+\texttt{callee-save registers}\\
+\\
+\hline
+\texttt{local variables}\\
+\hline
+\\
+\end{tabular}
+\caption{Stack frame for non-static method. In our case, callee-save registers (CSR) are \texttt{esi}, \texttt{edi}, and \texttt{ebx}}
+\end{marginfigure}
+
+
+
+In what follows we will assume that both the caller and callee methods are non-static, i.e. need an implicit \verb'this' to be pushed after their arguments. If a method is static, the arguments on the stack will be immediately followed by the return address of the method. 
+
+Consider a method $M$ (the caller) that has a method invocation $m$ in tail position. 
+
+The idea of TCO is to reuse the caller's stack frame to store the callee's one. In order to do this, instead of calling $m$ and returning to $M$, we \textit{jump} to $m$ and return to $M$'s return address after $m$ has finished executing. However, since we won't return to $M$ to pop the CSR, we will skip pushing them in $m$ in order to pop them only once (we push in $M$, but pop in $m$). To skip saving CSR in $m$, instead of jumping to $m$'s label, we jump to the position in $m$ that is right after the CSR saving, using a special label for TCO invocations.
+
+When we jump to the right position in the method declaration of $m$, we need to make sure the arguments for $m$'s invocation are placed in the right position on the stack. To replace $M$'s stack frame with $m$'s, we
+
+\begin{itemize}
+  \item replace the arguments and implicit \verb'this' of $M$ with the arguments and implicit \verb'this' of $m$
+  \item leave the return address, \verb'ebp', and CSR intact
+\end{itemize}
+
+Since the number of arguments for $M$ and $m$ might be different, we cannot just replace the caller's agruments with the callee's ones. For example, if $m$  has more arguments than $M$, data on the stack that precedes $M$'s arguments will be overridden if we maintain the data that should not be moved on the same place. 
+
+To get around this problem, just before we jump to $m$'s declaration, we first push all the contents of the beginning of $m$'s stack frame into the stack \footnote{$m$'s arguments, $m$'s implicit \texttt'this', $M$'s caller's return address, $M$'s caller's ebp, and $M$'s CSR}. Then we move the pushed values up the stack, so that $m$'s first argument overrides $M$'s first argument. After the readjustment of the stack, the stack pointer is moved to point to the new location of the last CSR.
+
+\section{Testing}
+As a form of regression testing, the TCO was enabled, and the \textit{Juice} compiler was run against the Marmoset test suite; no additional test failures occured. 
+
+To actually test that the TCO implementation achieves its purpose, we ran tail-recursive functions with one argument for which the amount of tail call invocations was proportional to the value of its argument. For a large argument value, the function would caused a stack overflow (seen as a segmentation fault) in the TCO-disabled mode of the compiler. With TCO enabled, the function ran fine. Here is a simple example of a testing function:
+
+\inputMinted{java}{testt.java}
+
+\section{Conclusions}
+Optimization of tail calls is a useful feature to have, because recursion is a powerful and expressive programming construct.
+TCO is usually associated with implementations of functional programming languages. However, by doing simple modifications to the mechanism for allocations of new stack frames, we can add it to a more traditional ALGOL-like imperative language.
+
+\end{document}
+
+\begin{fullwidth}
+\bibliography{bib}
+\end{fullwidth}
+\end{document}
